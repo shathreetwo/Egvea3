@@ -1,0 +1,75 @@
+오류 1. 한글이 매번 깨진다. 
+
+# 한글 폰트 등록 (예: 'NanumGothic' 폰트 사용)
+LabelBase.register(name="Noto", fn_regular="NotoSansKR.ttf")
+
+폰트 등록해서 한글 쓸때마다 font 속성으로 넣어주는 것도 귀찮고 지저분함.
+
+# 기본 폰트 이름을 NanumGothic으로 덮어쓰기
+from kivy.resources import resource_add_path
+from kivy.core.text import LabelBase
+
+LabelBase.register(name='Roboto', fn_regular='NotoSansKR.ttf')  # 기본 폰트 이름 Roboto 덮어쓰기
+
+Roboto는 키비 기본 폰트 이름
+Roboto를 나눔고딕 폰트 파일로 재등록하면 기본 폰트가 나눔고딕으로 바뀌어서 따로 font_name 지정 안해도 된다. 
+
+오류 2. 위젯이 안움직이고 왼쪽 아래에 박혀있다.
+좌표 0.0 에 계속 박혀있어서 print(f"")로 로그확인.
+
+    def on_touch_move(self, touch):
+        if self.dragging:
+            if not self.parent:
+                print("No parent!")
+                return super().on_touch_move(touch)
+
+            print(f"Parent size: {self.parent.width}, {self.parent.height}")
+
+            new_x = touch.x - self.touch_offset[0]
+            new_y = touch.y - self.touch_offset[1]
+
+            print(f"{new_x} , {new_y}")
+
+            max_x = self.parent.width - self.width
+            max_y = self.parent.height - self.height
+
+            print(f"{max_x} , {max_y}")
+
+            new_x_clamped = max(0, min(new_x, max_x))
+            new_y_clamped = max(0, min(new_y, max_y))
+
+            print(f"Touch move at {touch.pos}, moving to ({new_x_clamped}, {new_y_clamped})")
+            self.pos = (new_x_clamped, new_y_clamped)
+            return True
+        return super().on_touch_move(touch)
+
+max_x, max_y가 항상 0으로 나온다. 그래서 clamped에서 좌표가 0,0 으로 변경됨. 
+
+그냥 new_x,new_y로만 움직이게함. 
+잘움직여짐. 
+
+오류 3. 현재 상태
+
+제한(clamping)을 꺼서 이제 움직이긴 함.
+하지만:
+🔺 화면 밖으로 나감 → 위치 제한(clamping)이 필요함.
+🔺 터치가 상자의 오른쪽 위쪽에서만 잡힘 → 터치 offset 문제 또는 위젯 크기 문제.
+
+움직이는 함수를 부모위젯인 게임 스크린에서 처리하게 함. 
+
+해결. 
+화면 어디를 눌러도 드래그 시작
+우주선이 자연스럽게 터치 위치를 따라 움직임
+SpaceShip은 입력만 받고 터치에 관여하지 않음
+
+오류 4. 적이랑 안닿았는데도 충돌판정. 
+로그보니까 적 크기가 화면크기로 되있음. 보이는것보다 오른쪽 위쪽으로 엄청 큰상태. 
+해결. 
+
+다른 느낌으로 안보이는곳에서 충돌남. 
+로그 달아보니 총알맞고 충돌났는데 총알이랑은 떨어져있었음. 
+이번엔 총알 크기가 화면크기로 되있다. 총알의 오른쪽에 있으면 떨어져있어도 무조건 맞는 크기. 
+
+self.size_hint = (None, None)  # 필수: 크기 고정 안 하면 부모 크기 따라감
+이걸 안하면 크기가 부모크기(화면크기)로 엄청 커진다. 
+해결완료.

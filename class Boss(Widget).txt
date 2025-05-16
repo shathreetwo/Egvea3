@@ -1,0 +1,230 @@
+class Boss(Widget):
+    boss_type = NumericProperty(1)
+    phase = NumericProperty(1)
+    pattern_index = NumericProperty(0)
+    health = NumericProperty(100)
+
+    def __init__(self,  boss_type=1, game_screen=None, **kwargs):
+        #self.boss_type = kwargs.pop('boss_type', 1)  # 인자로 받음
+        super().__init__(**kwargs)
+        self.game_screen = game_screen
+        self.size = (120, 120)
+        self.size_hint = (None, None)  # 필수: 크기 고정 안 하면 부모 크기 따라감
+        self.pattern_timer = 0
+
+        with self.canvas:
+            Color(0.6, 0, 0.6)
+            self.rect = Rectangle(pos=self.pos, size=self.size)
+
+        self.bind(pos=self.update_graphics)
+
+        # 💡 패턴을 보스 타입에 따라 다르게 구성
+        if self.boss_type == 1:
+            self.patterns = [self.pattern_straight_bullets]
+        elif self.boss_type == 2:
+            self.patterns = [self.pattern_spread_bullets, self.pattern_straight_bullets]
+        else:
+            self.patterns = [self.pattern_straight_bullets]
+
+        # 패턴 반복 호출
+        #Clock.schedule_interval(self.attack, 1.5)
+
+
+
+    def update_graphics(self, *args):
+        self.rect.pos = self.pos
+        
+    def move(self, dt):
+        pass  # 현재는 움직이지 않음
+
+    def update(self, dt):
+        self.pattern_timer += dt
+        if self.pattern_timer > 2:
+            self.patterns[self.pattern_index % len(self.patterns)]()
+            self.pattern_index += 1
+            self.pattern_timer = 0
+        self.y -= 0.5  # 보스 이동
+
+    def pattern_straight_bullets(self):
+        # 보스 위치 중앙에서 아래로 일직선 총알 여러 발
+        for offset in range(-60, 61, 30):  # -60, -30, 0, 30, 60
+            bullet = EnemyBullet2(
+                pos=(self.center_x + offset, self.y),
+                direction=(0, -1)
+            )
+            self.game_screen.enemy_bullets.append(bullet)
+            self.game_screen.layout.add_widget(bullet)
+
+    def pattern_spread_bullets(self):
+        # 여러 방향으로 퍼지는 총알
+        for angle_deg in range(210, 331, 15):  # 아래 반원 방향
+            angle = radians(angle_deg)
+            bullet = EnemyBullet2(
+                pos=(self.center_x, self.y),
+                direction=(cos(angle), sin(angle))
+            )
+            self.game_screen.enemy_bullets.append(bullet)
+            self.game_screen.layout.add_widget(bullet)
+
+    def pattern_target_player(self):
+        if not hasattr(self.game_screen, "ship"):
+            return
+        player = self.game_screen.ship
+        dx = player.center_x - self.center_x
+        dy = player.center_y - self.center_y
+        length = max((dx**2 + dy**2)**0.5, 0.1)
+        direction = (dx / length, dy / length)
+
+        bullet = EnemyBullet2(
+            pos=(self.center_x, self.y),
+            direction=direction
+        )
+        self.game_screen.enemy_bullets.append(bullet)
+        self.game_screen.layout.add_widget(bullet)
+
+    def attack(self, dt):
+        for pattern in self.patterns:
+            pattern()
+        
+    def take_damage(self, amount):
+        self.health -= amount
+        if self.health <= 0:
+            self.defeated()
+
+    def defeated(self):
+        print("🎉 보스 격파!")
+        self.parent.remove_widget(self)
+
+
+
+
+class GameScreen(Screen):
+    selected_ship = NumericProperty(1)
+    enemies = ListProperty([])
+
+    def on_enter(self):
+        self.clear_widgets()
+        self.layout = FloatLayout(size_hint=(1, 1))
+        self.add_widget(self.layout)
+        self.init_game()
+        self.enemy_bullets = []  # on_enter나 init_game에서 초기화
+        #self.boss = None  # 🛠️ 여기 추가!
+        self.boss = Boss(boss_type=2, game_screen=self)
+        Clock.schedule_once(self.spawn_boss, 10)
+        
+
+
+    def init_game(self):
+        self.ship = SpaceShip(ship_type=self.selected_ship, pos=(self.width / 2 - 25, 50))
+        self.layout.add_widget(self.ship)
+
+        self.enemy_spawn_event = Clock.schedule_interval(self.spawn_enemy, 2)
+        #Clock.schedule_interval(self.spawn_enemy, 2)
+        Clock.schedule_interval(self.update, 1 / 60)
+
+        self.dragging = False
+        self.touch_offset = (0, 0)
+
+    def spawn_enemy(self, dt):
+        enemy_type = randint(1, 3)
+        x = randint(0, int(self.width - 40))
+        enemy = Enemy(pos=(x, self.height), enemy_type=enemy_type, target=self.ship)
+        self.enemies.append(enemy)
+        self.layout.add_widget(enemy)
+        #print(f"Spawned enemy type {enemy_type} at {enemy.pos} with size {enemy.size}")
+
+    def update(self, dt):
+        for enemy in self.enemies[:]:
+            enemy.move(dt)
+            #print(f"Enemy type {enemy.enemy_type} at {enemy.pos}, size {enemy.size}")
+            if self.ship.collide_widget(enemy):
+                print(f"💥 충돌! 게임 오버! 적 종류: {enemy.enemy_type}, 적 위치: {enemy.pos}, 우주선 위치: {self.ship.pos}")
+                self.enemies.remove(enemy)
+                self.layout.remove_widget(enemy)
+                self.game_over()
+                return
+
+            if enemy.y < 0:
+                self.enemies.remove(enemy)
+                self.layout.remove_widget(enemy)
+
+                
+        for bullet in self.enemy_bullets[:]:
+            bullet.move()
+            #print(f"Bullet pos: {bullet.pos}, size: {bullet.size}")
+            #print(f"Ship pos: {self.ship.pos}, size: {self.ship.size}")
+            if bullet.y < -20:
+                self.enemy_bullets.remove(bullet)
+                self.remove_widget(bullet)
+            elif bullet.collide_widget(self.ship):
+                print("Ship hit by visible bullet!")
+                self.game_over()
+
+        if self.boss:
+            self.boss.move(dt)
+
+            if self.ship.collide_widget(self.boss):
+                print("💥 보스와 충돌! 게임 오버!")
+                self.game_over()
+
+            # 나중에 총알 충돌 처리나 체력 UI 등 추가 가능
+                
+    def game_over(self):
+        Clock.unschedule(self.update)
+        Clock.unschedule(self.spawn_enemy)
+        print("게임 오버!")
+        # 필요시 label 추가 또는 화면 전환 가능
+        # 우주선 삭제
+        self.layout.remove_widget(self.ship)
+
+        # 혹은 멈추기만 하고 싶다면:
+        # self.ship.dragging = False
+        # self.dragging = False
+
+    def on_touch_down(self, touch):
+        # 항상 드래그 시작으로 처리
+        self.dragging = True
+        self.touch_offset = (touch.x - self.ship.x, touch.y - self.ship.y)
+        return True
+
+    def on_touch_move(self, touch):
+        if self.dragging:
+            new_x = touch.x - self.touch_offset[0]
+            new_y = touch.y - self.touch_offset[1]
+
+            max_x = self.width - self.ship.width
+            max_y = self.height - self.ship.height
+
+            new_x_clamped = max(0, min(new_x, max_x))
+            new_y_clamped = max(0, min(new_y, max_y))
+
+            self.ship.pos = (new_x_clamped, new_y_clamped)
+            return True
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        self.dragging = False
+        return True
+    
+    def shoot(self, pos):
+        bullet = EnemyBullet(pos=pos)
+        self.enemy_bullets.append(bullet)
+        self.layout.add_widget(bullet)
+
+    def spawn_boss(self, dt):
+        boss_type = randint(1, 2)
+        self.boss = Boss(boss_type=boss_type)
+        self.layout.add_widget(self.boss)
+        self.boss.center_x = self.width / 2
+        self.boss.top = self.height - 20
+        print(f"🚨 보스 등장! 타입: {boss_type}")
+
+        # 일반 적 스폰 중단
+        if hasattr(self, 'enemy_spawn_event'):
+            Clock.unschedule(self.enemy_spawn_event)
+
+        self.start_boss()
+
+    def start_boss(self):
+        # 보스 패턴 시작 (보스가 이미 생성되고 부모에 추가된 후)
+        Clock.schedule_interval(self.boss.attack, 1.5)
